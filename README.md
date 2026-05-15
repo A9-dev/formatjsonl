@@ -2,7 +2,7 @@
 
 Minimal JSON Lines (jsonl) formatter.
 
-[formatjsonl.com](formatjsonl.com)
+[formatjsonl.com](https://formatjsonl.com)
 
 ## What it does
 
