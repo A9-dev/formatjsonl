@@ -188,13 +188,9 @@ function buildPrettyRecordBlocks(records, indent) {
       blocks.push({ startRow: currentRow, endRow: currentRow + lineCount - 1 });
       currentRow += lineCount;
 
-      if (index < renderedRecords.length - 1) {
-        currentRow += 1;
-      }
-
       return recordText;
     })
-    .join("\n\n");
+    .join("\n");
 
   return { output, blocks };
 }
