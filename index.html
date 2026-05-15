@@ -41,7 +41,9 @@
       </header>
 
       <section class="editor-shell" aria-label="JSONL editor surface">
-        <div id="editor"></div>
+        <div class="editor-frame">
+          <div id="editor" class="editor-host"></div>
+        </div>
         <div id="empty-state" class="empty-state">
           <p>
             Paste raw JSONL, upload a file, or drop one anywhere in the editor.
@@ -61,9 +63,6 @@
       </footer>
     </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.35.4/src-noconflict/ace.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.35.4/src-noconflict/mode-json.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.35.4/src-noconflict/theme-github.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

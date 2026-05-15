@@ -1,6 +1,29 @@
+import {
+  EditorSelection,
+  EditorState,
+  StateEffect,
+  StateField,
+} from "https://cdn.jsdelivr.net/npm/@codemirror/state@6.5.2/+esm";
+import {
+  Decoration,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+} from "https://cdn.jsdelivr.net/npm/@codemirror/view@6.38.6/+esm";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+} from "https://cdn.jsdelivr.net/npm/@codemirror/commands@6.8.1/+esm";
+import {
+  bracketMatching,
+  indentUnit,
+} from "https://cdn.jsdelivr.net/npm/@codemirror/language@6.11.3/+esm";
 import { formatRecordsWithBlocks, parseJsonlInput } from "./formatter.js";
 
-const editor = ace.edit("editor");
+const editorRoot = document.querySelector("#editor");
 const emptyState = document.querySelector("#empty-state");
 const status = document.querySelector("#status");
 const fileInput = document.querySelector("#file-input");
@@ -9,9 +32,7 @@ const exampleButton = document.querySelector("#example-button");
 const copyButton = document.querySelector("#copy-button");
 const clearButton = document.querySelector("#clear-button");
 const editorShell = document.querySelector(".editor-shell");
-const editorScroller = editor.container.querySelector(".ace_scroller");
 const autoFormatDelayMs = 220;
-const blockGapPx = 12;
 const formatOptions = {
   indent: 2,
   layout: "pretty-records",
@@ -35,30 +56,132 @@ const exampleJsonl = [
   }),
 ].join("\n");
 
-const blockLayer = document.createElement("div");
-blockLayer.className = "editor-block-layer";
-editorScroller.prepend(blockLayer);
+const setDecorationsEffect = StateEffect.define();
+const decorationField = StateField.define({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, transaction) {
+    decorations = decorations.map(transaction.changes);
+
+    for (const effect of transaction.effects) {
+      if (effect.is(setDecorationsEffect)) {
+        return effect.value;
+      }
+    }
+
+    return decorations;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+const editorTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    background: "linear-gradient(180deg, #f3efe9, #f8f4ee)",
+    color: "var(--text)",
+  },
+  ".cm-scroller": {
+    overflow: "auto",
+    fontFamily: '"IBM Plex Mono", "SFMono-Regular", monospace',
+    lineHeight: "1.65",
+  },
+  ".cm-content": {
+    minHeight: "100%",
+    padding: "14px 18px 18px",
+    caretColor: "#d04e22",
+  },
+  ".cm-line": {
+    padding: "0 8px 0 0",
+    borderRadius: "0",
+  },
+  ".cm-gutters": {
+    borderRight: "1px solid rgba(19, 64, 78, 0.1)",
+    background: "rgba(243, 237, 231, 0.9)",
+    color: "rgba(22, 50, 61, 0.52)",
+    paddingTop: "14px",
+  },
+  ".cm-gutterElement": {
+    fontFamily: '"IBM Plex Mono", "SFMono-Regular", monospace',
+    fontSize: "15px",
+    lineHeight: "1.65",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "2.6rem",
+    padding: "0 1rem 0 0.6rem",
+  },
+  ".cm-activeLine": {
+    background: "rgba(226, 109, 61, 0.08)",
+  },
+  ".cm-activeLineGutter": {
+    background: "rgba(226, 109, 61, 0.08)",
+  },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+    background: "rgba(226, 109, 61, 0.18)",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "#d04e22",
+  },
+  ".cm-focused": {
+    outline: "none",
+  },
+});
 
 let autoFormatTimer = 0;
 let isApplyingFormat = false;
 let recordBlocks = [];
-let blockRenderFrame = 0;
+let errorLineNumber = 0;
+let decorationRefreshFrame = 0;
 
-editor.setTheme("ace/theme/github");
-editor.session.setMode("ace/mode/json");
-editor.session.setUseWorker(false);
-editor.setOptions({
-  fontFamily: "IBM Plex Mono",
-  fontSize: "15px",
-  highlightActiveLine: true,
-  highlightSelectedWord: true,
-  printMargin: false,
-  showFoldWidgets: false,
-  tabSize: 2,
-  useSoftTabs: true,
-  wrap: true,
+const editorView = new EditorView({
+  parent: editorRoot,
+  state: EditorState.create({
+    doc: "",
+    extensions: [
+      history(),
+      keymap.of([...defaultKeymap, ...historyKeymap]),
+      lineNumbers(),
+      highlightActiveLine(),
+      highlightActiveLineGutter(),
+      EditorState.tabSize.of(2),
+      indentUnit.of("  "),
+      EditorView.lineWrapping,
+      EditorView.contentAttributes.of({
+        "aria-label": "JSONL editor",
+        spellcheck: "false",
+        autocapitalize: "off",
+        autocomplete: "off",
+        autocorrect: "off",
+      }),
+      bracketMatching(),
+      editorTheme,
+      decorationField,
+      EditorView.updateListener.of((update) => {
+        if (!update.docChanged) {
+          return;
+        }
+
+        syncEmptyState();
+
+        if (isApplyingFormat) {
+          return;
+        }
+
+        recordBlocks = [];
+        errorLineNumber = 0;
+        queueDecorationRefresh();
+
+        if (!getEditorValue().trim()) {
+          window.clearTimeout(autoFormatTimer);
+          setStatus("Ready for JSONL.");
+          return;
+        }
+
+        queueAutoFormat();
+      }),
+    ],
+  }),
 });
-editor.renderer.setScrollMargin(10, 18, 0, 0);
 
 function setStatus(message, tone = "default") {
   status.textContent = message;
@@ -72,107 +195,260 @@ function setStatus(message, tone = "default") {
 }
 
 function syncEmptyState() {
-  emptyState.hidden = editor.getValue().trim().length > 0;
+  emptyState.hidden = getEditorValue().trim().length > 0;
+}
+
+function getEditorValue() {
+  return editorView.state.doc.toString();
+}
+
+function addMarkRange(ranges, from, to, className) {
+  if (to <= from) {
+    return;
+  }
+
+  ranges.push(Decoration.mark({ class: className }).range(from, to));
+}
+
+function addSyntaxRanges(ranges, state) {
+  const numberPattern = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/;
+  const literalPattern = /^(true|false|null)\b/;
+
+  for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
+    const line = state.doc.line(lineNumber);
+    const text = line.text;
+    let index = 0;
+
+    while (index < text.length) {
+      const character = text[index];
+
+      if (character === '"') {
+        let endIndex = index + 1;
+        let escaped = false;
+
+        while (endIndex < text.length) {
+          const nextCharacter = text[endIndex];
+
+          if (!escaped && nextCharacter === '"') {
+            endIndex += 1;
+            break;
+          }
+
+          escaped = !escaped && nextCharacter === "\\";
+          endIndex += 1;
+        }
+
+        let lookaheadIndex = endIndex;
+
+        while (
+          lookaheadIndex < text.length &&
+          /\s/.test(text[lookaheadIndex])
+        ) {
+          lookaheadIndex += 1;
+        }
+
+        const tokenClass =
+          text[lookaheadIndex] === ":" ? "cm-token-key" : "cm-token-string";
+
+        addMarkRange(
+          ranges,
+          line.from + index,
+          line.from + endIndex,
+          tokenClass,
+        );
+        index = endIndex;
+        continue;
+      }
+
+      if (/[{}\[\]]/.test(character)) {
+        addMarkRange(
+          ranges,
+          line.from + index,
+          line.from + index + 1,
+          "cm-token-bracket",
+        );
+        index += 1;
+        continue;
+      }
+
+      if (/[,:]/.test(character)) {
+        addMarkRange(
+          ranges,
+          line.from + index,
+          line.from + index + 1,
+          "cm-token-punctuation",
+        );
+        index += 1;
+        continue;
+      }
+
+      if (character === "-" || /\d/.test(character)) {
+        const match = text.slice(index).match(numberPattern);
+
+        if (match) {
+          addMarkRange(
+            ranges,
+            line.from + index,
+            line.from + index + match[0].length,
+            "cm-token-number",
+          );
+          index += match[0].length;
+          continue;
+        }
+      }
+
+      if (/[tfn]/.test(character)) {
+        const match = text.slice(index).match(literalPattern);
+
+        if (match) {
+          const tokenClass =
+            match[0] === "null" ? "cm-token-null" : "cm-token-bool";
+          addMarkRange(
+            ranges,
+            line.from + index,
+            line.from + index + match[0].length,
+            tokenClass,
+          );
+          index += match[0].length;
+          continue;
+        }
+      }
+
+      index += 1;
+    }
+  }
+}
+
+function buildDecorations(state, blocks, lineNumber) {
+  const ranges = [];
+  const lineClasses = new Map();
+
+  blocks.forEach((block) => {
+    const startLine = Math.max(block.startRow + 1, 1);
+    const endLine = Math.min(block.endRow + 1, state.doc.lines);
+
+    for (
+      let currentLine = startLine;
+      currentLine <= endLine;
+      currentLine += 1
+    ) {
+      const classes = lineClasses.get(currentLine) ?? new Set();
+      classes.add("cm-record-block");
+
+      if (currentLine === startLine) {
+        classes.add("cm-record-block--start");
+      }
+
+      if (currentLine === endLine) {
+        classes.add("cm-record-block--end");
+      }
+
+      lineClasses.set(currentLine, classes);
+    }
+  });
+
+  if (lineNumber > 0 && lineNumber <= state.doc.lines) {
+    const classes = lineClasses.get(lineNumber) ?? new Set();
+    classes.add("cm-error-line");
+    lineClasses.set(lineNumber, classes);
+  }
+
+  lineClasses.forEach((classes, currentLine) => {
+    const line = state.doc.line(currentLine);
+    ranges.push(
+      Decoration.line({
+        attributes: {
+          class: Array.from(classes).join(" "),
+        },
+      }).range(line.from),
+    );
+  });
+
+  addSyntaxRanges(ranges, state);
+
+  return Decoration.set(ranges, true);
+}
+
+function updateDecorations() {
+  editorView.dispatch({
+    effects: setDecorationsEffect.of(
+      buildDecorations(editorView.state, recordBlocks, errorLineNumber),
+    ),
+  });
+}
+
+function queueDecorationRefresh() {
+  if (decorationRefreshFrame) {
+    window.cancelAnimationFrame(decorationRefreshFrame);
+  }
+
+  decorationRefreshFrame = window.requestAnimationFrame(() => {
+    decorationRefreshFrame = 0;
+    updateDecorations();
+  });
 }
 
 function clearAnnotations() {
-  editor.session.setAnnotations([]);
-}
-
-function queueRecordBlockRender() {
-  if (blockRenderFrame) {
-    window.cancelAnimationFrame(blockRenderFrame);
-  }
-
-  blockRenderFrame = window.requestAnimationFrame(() => {
-    blockRenderFrame = 0;
-    renderRecordBlocks();
-  });
+  errorLineNumber = 0;
+  updateDecorations();
 }
 
 function clearRecordBlocks() {
   recordBlocks = [];
-  blockLayer.replaceChildren();
+  updateDecorations();
 }
 
 function focusLine(lineNumber) {
-  editor.scrollToLine(lineNumber, true, true, () => {});
-  editor.gotoLine(lineNumber, 1, true);
-}
+  const boundedLine = Math.min(
+    Math.max(lineNumber, 1),
+    editorView.state.doc.lines,
+  );
+  const line = editorView.state.doc.line(boundedLine);
 
-function getScreenRow(row, column) {
-  return editor.session.documentToScreenPosition(row, column).row;
-}
-
-function renderRecordBlocks() {
-  if (!recordBlocks.length) {
-    blockLayer.replaceChildren();
-    return;
-  }
-
-  const scrollTop = editor.session.getScrollTop();
-  const scrollLeft = editor.session.getScrollLeft();
-  const lineHeight = editor.renderer.lineHeight;
-  const viewportHeight = editorScroller.clientHeight;
-  const fragment = document.createDocumentFragment();
-
-  recordBlocks.forEach((block) => {
-    const endColumn = editor.session.getLine(block.endRow).length;
-    const startTop = getScreenRow(block.startRow, 0) * lineHeight - scrollTop;
-    const endBottom =
-      (getScreenRow(block.endRow, endColumn) + 1) * lineHeight - scrollTop;
-
-    if (endBottom < 0 || startTop > viewportHeight) {
-      return;
-    }
-
-    const blockElement = document.createElement("div");
-    blockElement.className = "editor-block";
-    blockElement.style.top = `${startTop + blockGapPx / 2}px`;
-    blockElement.style.height = `${Math.max(endBottom - startTop - blockGapPx, lineHeight - 8)}px`;
-    fragment.append(blockElement);
+  editorView.dispatch({
+    selection: EditorSelection.cursor(line.from),
+    effects: EditorView.scrollIntoView(line.from, { y: "center" }),
   });
-
-  blockLayer.style.transform = `translateX(${-scrollLeft}px)`;
-  blockLayer.replaceChildren(fragment);
+  editorView.focus();
 }
 
 function updateRecordBlocks(blocks) {
   recordBlocks = blocks;
-  queueRecordBlockRender();
+  updateDecorations();
 }
 
 function setEditorValue(text) {
-  const cursor = editor.getCursorPosition();
-  const scrollTop = editor.session.getScrollTop();
-  const scrollLeft = editor.session.getScrollLeft();
+  const selection = editorView.state.selection.main;
+  const scrollTop = editorView.scrollDOM.scrollTop;
+  const scrollLeft = editorView.scrollDOM.scrollLeft;
 
   isApplyingFormat = true;
-  editor.setValue(text, -1);
+  editorView.dispatch({
+    changes: { from: 0, to: editorView.state.doc.length, insert: text },
+    selection: EditorSelection.range(
+      Math.min(selection.from, text.length),
+      Math.min(selection.to, text.length),
+    ),
+  });
   isApplyingFormat = false;
 
-  const lastRow = Math.max(editor.session.getLength() - 1, 0);
-  const targetRow = Math.min(cursor.row, lastRow);
-  const targetColumn = Math.min(
-    cursor.column,
-    editor.session.getLine(targetRow).length,
-  );
-
-  editor.session.setScrollTop(scrollTop);
-  editor.session.setScrollLeft(scrollLeft);
-  editor.moveCursorTo(targetRow, targetColumn);
-  editor.clearSelection();
+  editorView.scrollDOM.scrollTop = scrollTop;
+  editorView.scrollDOM.scrollLeft = scrollLeft;
 }
 
 function loadContent(text) {
-  clearAnnotations();
-  clearRecordBlocks();
-  editor.setValue(text, -1);
+  errorLineNumber = 0;
+  recordBlocks = [];
+  editorView.dispatch({
+    changes: { from: 0, to: editorView.state.doc.length, insert: text },
+    selection: EditorSelection.cursor(0),
+  });
+  updateDecorations();
   syncEmptyState();
 }
 
 function applyFormatting(sourceLabel = "Auto-formatted") {
-  const sourceText = editor.getValue();
+  const sourceText = getEditorValue();
 
   if (!sourceText.trim()) {
     clearAnnotations();
@@ -200,15 +476,9 @@ function applyFormatting(sourceLabel = "Auto-formatted") {
         ? error.message
         : "Unable to format the JSONL input.";
 
-    clearRecordBlocks();
-    editor.session.setAnnotations([
-      {
-        row: Math.max(lineNumber - 1, 0),
-        column: 0,
-        text: message,
-        type: "error",
-      },
-    ]);
+    recordBlocks = [];
+    errorLineNumber = Math.max(lineNumber, 1);
+    updateDecorations();
     focusLine(lineNumber);
     setStatus(`Line ${lineNumber}: ${message}`, "error");
     return false;
@@ -237,7 +507,7 @@ async function importFile(file) {
 }
 
 async function copyOutput() {
-  const text = editor.getValue();
+  const text = getEditorValue();
 
   if (!text.trim()) {
     setStatus("Nothing to copy yet.", "error");
@@ -281,42 +551,15 @@ copyButton.addEventListener("click", () => {
 
 clearButton.addEventListener("click", () => {
   window.clearTimeout(autoFormatTimer);
-  clearAnnotations();
-  clearRecordBlocks();
-  editor.setValue("", -1);
+  errorLineNumber = 0;
+  recordBlocks = [];
+  editorView.dispatch({
+    changes: { from: 0, to: editorView.state.doc.length, insert: "" },
+    selection: EditorSelection.cursor(0),
+  });
+  updateDecorations();
   syncEmptyState();
   setStatus("Cleared the editor.");
-});
-
-editor.session.on("change", () => {
-  syncEmptyState();
-
-  if (isApplyingFormat) {
-    return;
-  }
-
-  clearAnnotations();
-  clearRecordBlocks();
-
-  if (!editor.getValue().trim()) {
-    window.clearTimeout(autoFormatTimer);
-    setStatus("Ready for JSONL.");
-    return;
-  }
-
-  queueAutoFormat();
-});
-
-editor.session.on("changeScrollTop", () => {
-  queueRecordBlockRender();
-});
-
-editor.session.on("changeScrollLeft", () => {
-  queueRecordBlockRender();
-});
-
-window.addEventListener("resize", () => {
-  queueRecordBlockRender();
 });
 
 editorShell.addEventListener("dragover", (event) => {
@@ -334,3 +577,4 @@ editorShell.addEventListener("drop", async (event) => {
 
 setStatus("Ready for JSONL.");
 syncEmptyState();
+updateDecorations();
