@@ -144,6 +144,25 @@ button:focus-visible {
   box-shadow: var(--shadow);
 }
 
+.app-footer {
+  display: flex;
+  justify-content: center;
+  padding: 0 1rem 1rem;
+}
+
+.app-footer__link {
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.app-footer__link:hover,
+.app-footer__link:focus-visible {
+  color: var(--accent-strong);
+}
+
 #editor {
   position: absolute;
   inset: 0;
@@ -253,5 +272,9 @@ button:focus-visible {
   .editor-shell {
     margin: 0.7rem;
     border-radius: 22px;
+  }
+
+  .app-footer {
+    padding-bottom: 0.9rem;
   }
 }
