@@ -467,17 +467,46 @@ function updateRecordBlocks(blocks) {
   queueBlockRender();
 }
 
+function getSelectionLineColumn(position) {
+  const line = editorView.state.doc.lineAt(position);
+
+  return {
+    lineNumber: line.number,
+    column: position - line.from,
+  };
+}
+
+function getPositionFromLineColumn(doc, lineNumber, column) {
+  const safeLineNumber = Math.min(Math.max(lineNumber, 1), doc.lines || 1);
+  const line = doc.line(safeLineNumber);
+
+  return Math.min(line.from + column, line.to);
+}
+
 function setEditorValue(text) {
   const selection = editorView.state.selection.main;
   const scrollTop = editorView.scrollDOM.scrollTop;
   const scrollLeft = editorView.scrollDOM.scrollLeft;
+  const anchorLocation = getSelectionLineColumn(selection.anchor);
+  const headLocation = getSelectionLineColumn(selection.head);
 
   isApplyingFormat = true;
+  const nextState = editorView.state.update({
+    changes: { from: 0, to: editorView.state.doc.length, insert: text },
+  }).state;
   editorView.dispatch({
     changes: { from: 0, to: editorView.state.doc.length, insert: text },
     selection: EditorSelection.range(
-      Math.min(selection.from, text.length),
-      Math.min(selection.to, text.length),
+      getPositionFromLineColumn(
+        nextState.doc,
+        anchorLocation.lineNumber,
+        anchorLocation.column,
+      ),
+      getPositionFromLineColumn(
+        nextState.doc,
+        headLocation.lineNumber,
+        headLocation.column,
+      ),
     ),
   });
   isApplyingFormat = false;
@@ -529,7 +558,6 @@ function applyFormatting(sourceLabel = "Auto-formatted") {
     recordBlocks = [];
     errorLineNumber = Math.max(lineNumber, 1);
     updateDecorations();
-    focusLine(lineNumber);
     setStatus(`Line ${lineNumber}: ${message}`, "error");
     return false;
   }
