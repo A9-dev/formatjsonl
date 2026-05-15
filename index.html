@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JSONL Formatter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="toolbar">
+        <div class="toolbar__row">
+          <div class="actions" role="group" aria-label="Editor actions">
+            <button id="upload-button" type="button">Upload</button>
+            <button id="example-button" type="button">Insert example JSONL</button>
+            <button id="copy-button" type="button">Copy</button>
+            <button id="clear-button" type="button">Clear</button>
+          </div>
+          <h1 class="toolbar__title">JSONL Formatter</h1>
+          <p id="status" class="status" aria-live="polite">Ready for JSONL.</p>
+        </div>
+
+        <input
+          id="file-input"
+          type="file"
+          accept=".jsonl,.ndjson,.json,.txt"
+          hidden
+        />
+      </header>
+
+      <section class="editor-shell" aria-label="JSONL editor surface">
+        <div id="editor"></div>
+        <div id="empty-state" class="empty-state">
+          <p>Paste raw JSONL, upload a file, or drop one anywhere in the editor.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.35.4/src-noconflict/ace.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.35.4/src-noconflict/mode-json.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.35.4/src-noconflict/theme-github.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
