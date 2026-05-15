@@ -78,7 +78,7 @@ const decorationField = StateField.define({
 const editorTheme = EditorView.theme({
   "&": {
     height: "100%",
-    background: "linear-gradient(180deg, #f3efe9, #f8f4ee)",
+    background: "rgba(255, 250, 244, 0.94)",
     color: "var(--text)",
   },
   ".cm-scroller": {

@@ -1,7 +1,6 @@
 :root {
   color-scheme: light;
   --bg-top: #eff8f6;
-  --bg-bottom: #f7eee2;
   --panel: rgba(255, 250, 244, 0.92);
   --panel-edge: rgba(19, 64, 78, 0.12);
   --text: #16323d;
@@ -26,18 +25,7 @@ body {
 body {
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
   color: var(--text);
-  background:
-    radial-gradient(
-      circle at top left,
-      rgba(226, 109, 61, 0.18),
-      transparent 32%
-    ),
-    radial-gradient(
-      circle at bottom right,
-      rgba(53, 117, 111, 0.22),
-      transparent 28%
-    ),
-    linear-gradient(145deg, var(--bg-top), var(--bg-bottom));
+  background: var(--bg-top);
 }
 
 .shell {
@@ -50,11 +38,7 @@ body {
   position: relative;
   z-index: 2;
   padding: 1rem 1rem 0.85rem;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 250, 244, 0.96),
-    rgba(255, 250, 244, 0.84)
-  );
+  background: var(--panel);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--panel-edge);
   box-shadow: 0 12px 30px rgba(22, 50, 61, 0.05);
