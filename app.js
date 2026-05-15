@@ -99,7 +99,6 @@ const editorTheme = EditorView.theme({
     borderRight: "1px solid rgba(19, 64, 78, 0.1)",
     background: "rgba(243, 237, 231, 0.9)",
     color: "rgba(22, 50, 61, 0.52)",
-    paddingTop: "14px",
   },
   ".cm-gutterElement": {
     fontFamily: '"IBM Plex Mono", "SFMono-Regular", monospace',
@@ -132,6 +131,7 @@ let isApplyingFormat = false;
 let recordBlocks = [];
 let errorLineNumber = 0;
 let decorationRefreshFrame = 0;
+let blockRenderFrame = 0;
 
 const editorView = new EditorView({
   parent: editorRoot,
@@ -157,6 +157,14 @@ const editorView = new EditorView({
       editorTheme,
       decorationField,
       EditorView.updateListener.of((update) => {
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          update.geometryChanged
+        ) {
+          queueBlockRender();
+        }
+
         if (!update.docChanged) {
           return;
         }
@@ -182,6 +190,10 @@ const editorView = new EditorView({
     ],
   }),
 });
+
+const recordBlockLayer = document.createElement("div");
+recordBlockLayer.className = "editor-block-layer";
+editorView.scrollDOM.prepend(recordBlockLayer);
 
 function setStatus(message, tone = "default") {
   status.textContent = message;
@@ -323,30 +335,6 @@ function buildDecorations(state, blocks, lineNumber) {
   const ranges = [];
   const lineClasses = new Map();
 
-  blocks.forEach((block) => {
-    const startLine = Math.max(block.startRow + 1, 1);
-    const endLine = Math.min(block.endRow + 1, state.doc.lines);
-
-    for (
-      let currentLine = startLine;
-      currentLine <= endLine;
-      currentLine += 1
-    ) {
-      const classes = lineClasses.get(currentLine) ?? new Set();
-      classes.add("cm-record-block");
-
-      if (currentLine === startLine) {
-        classes.add("cm-record-block--start");
-      }
-
-      if (currentLine === endLine) {
-        classes.add("cm-record-block--end");
-      }
-
-      lineClasses.set(currentLine, classes);
-    }
-  });
-
   if (lineNumber > 0 && lineNumber <= state.doc.lines) {
     const classes = lineClasses.get(lineNumber) ?? new Set();
     classes.add("cm-error-line");
@@ -367,6 +355,66 @@ function buildDecorations(state, blocks, lineNumber) {
   addSyntaxRanges(ranges, state);
 
   return Decoration.set(ranges, true);
+}
+
+function renderRecordBlocks() {
+  if (!recordBlocks.length) {
+    recordBlockLayer.replaceChildren();
+    return;
+  }
+
+  const scrollRect = editorView.scrollDOM.getBoundingClientRect();
+  const gutterRect = editorView.dom
+    .querySelector(".cm-gutters")
+    ?.getBoundingClientRect();
+  const scrollTop = editorView.scrollDOM.scrollTop;
+  const viewportHeight = editorView.scrollDOM.clientHeight;
+  const fragment = document.createDocumentFragment();
+  const contentStyle = window.getComputedStyle(editorView.contentDOM);
+  const contentTopInset = Number.parseFloat(contentStyle.paddingTop) || 0;
+  const leftInset =
+    (gutterRect?.right ?? scrollRect.left) - scrollRect.left + 12;
+
+  recordBlocks.forEach((block) => {
+    const startLineNumber = Math.max(block.startRow + 1, 1);
+    const endLineNumber = Math.min(
+      block.endRow + 1,
+      editorView.state.doc.lines,
+    );
+    const startLine = editorView.state.doc.line(startLineNumber);
+    const endLine = editorView.state.doc.line(endLineNumber);
+    const startBlock = editorView.lineBlockAt(startLine.from);
+    const endBlock = editorView.lineBlockAt(endLine.from);
+    const top = startBlock.top + contentTopInset;
+    const bottom = endBlock.bottom + contentTopInset;
+    const visibleTop = top - scrollTop;
+    const visibleBottom = bottom - scrollTop;
+
+    if (visibleBottom < 0 || visibleTop > viewportHeight) {
+      return;
+    }
+
+    const blockElement = document.createElement("div");
+    blockElement.className = "editor-block";
+    blockElement.style.top = `${top}px`;
+    blockElement.style.left = `${leftInset}px`;
+    blockElement.style.right = `18px`;
+    blockElement.style.height = `${Math.max(bottom - top, 0)}px`;
+    fragment.append(blockElement);
+  });
+
+  recordBlockLayer.replaceChildren(fragment);
+}
+
+function queueBlockRender() {
+  if (blockRenderFrame) {
+    window.cancelAnimationFrame(blockRenderFrame);
+  }
+
+  blockRenderFrame = window.requestAnimationFrame(() => {
+    blockRenderFrame = 0;
+    renderRecordBlocks();
+  });
 }
 
 function updateDecorations() {
@@ -396,6 +444,7 @@ function clearAnnotations() {
 function clearRecordBlocks() {
   recordBlocks = [];
   updateDecorations();
+  queueBlockRender();
 }
 
 function focusLine(lineNumber) {
@@ -415,6 +464,7 @@ function focusLine(lineNumber) {
 function updateRecordBlocks(blocks) {
   recordBlocks = blocks;
   updateDecorations();
+  queueBlockRender();
 }
 
 function setEditorValue(text) {
@@ -575,6 +625,15 @@ editorShell.addEventListener("drop", async (event) => {
   }
 });
 
+editorView.scrollDOM.addEventListener("scroll", () => {
+  queueBlockRender();
+});
+
+window.addEventListener("resize", () => {
+  queueBlockRender();
+});
+
 setStatus("Ready for JSONL.");
 syncEmptyState();
 updateDecorations();
+queueBlockRender();
